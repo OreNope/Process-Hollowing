@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <winternl.h>
 
 #include <iostream>
 #include <string>
@@ -27,20 +28,20 @@ public:
 
 	void hollow() const;
 
-
 // methods
 private:
+	void validateBinaries() const;
 	void loadNativeApiFuncs() const;
 	PROCESS_INFORMATION createHostSuspended() const;
 	LPVOID getPayloadImage() const;
 	PIMAGE_NT_HEADERS getNtHeadersFromImage(const LPVOID image) const;
 	LPVOID getProcBaseImageAddr(const PROCESS_INFORMATION& procInfo) const;
 	void hollowProcMemory(const PROCESS_INFORMATION& procInfo, const LPVOID baseImg) const;
-	void updateProcBaseImageAddr(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders) const;
-	void updateProcEntryPoint(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders) const;
 	void rebindProcHeaders(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const LPVOID image) const;
 	void rebindProcSections(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const LPVOID image) const;
-
+	void updateProcBaseImageAddr(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders) const;
+	void updateProcEntryPoint(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders) const;
+	void resumeHost(const PROCESS_INFORMATION& procInfo) const;
 
 // fields
 private:
@@ -50,6 +51,6 @@ private:
 // consts
 private: 
 	static constexpr BYTE BITS_IN_BYTE = 8;
-	static constexpr BYTE PE32_MAGIC = 0x10b;
+	static constexpr WORD PE32_MAGIC = 0x10b;
 	static constexpr BYTE BASE_IMG_OFFSET_FROM_PEB = 8;
 };
