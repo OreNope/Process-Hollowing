@@ -154,6 +154,7 @@
     <ClInclude Include="ImportException.h" />
     <ClInclude Include="ReadingException.h" />
     <ClInclude Include="ProccessAccessException.h" />
+    <ClInclude Include="RelocStructures.h" />
     <ClInclude Include="WritingException.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

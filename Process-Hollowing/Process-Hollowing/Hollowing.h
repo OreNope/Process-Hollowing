@@ -6,6 +6,8 @@
 #include <iostream>
 #include <string>
 
+#include "RelocStructures.h"
+
 // Custom exceptions
 #include "ImportException.h"
 #include "CreationFailedException.h"
@@ -18,7 +20,6 @@
 
 //// For native api access
 typedef NTSTATUS(NTAPI* pdef_NtUnmapViewOfSection)(IN HANDLE ProcessHandle, IN PVOID BaseAddress);
-static pdef_NtUnmapViewOfSection NtUnmapViewOfSection = nullptr;
 
 class Hollowing
 {
@@ -37,10 +38,11 @@ private:
 	PIMAGE_NT_HEADERS getNtHeadersFromImage(const LPVOID image) const;
 	LPVOID getProcBaseImageAddr(const PROCESS_INFORMATION& procInfo) const;
 	void hollowProcMemory(const PROCESS_INFORMATION& procInfo, const LPVOID baseImg) const;
-	void rebindProcHeaders(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const LPVOID image) const;
-	void rebindProcSections(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const LPVOID image) const;
-	void updateProcBaseImageAddr(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders) const;
-	void updateProcEntryPoint(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders) const;
+	PVOID rebindProcHeaders(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr, const LPVOID image) const;
+	PIMAGE_SECTION_HEADER rebindProcSections(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr, const LPVOID image) const;
+	void relocateHostProc(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PIMAGE_SECTION_HEADER piRelocSection, const PVOID hostBaseAddr, const PVOID image, const DWORD baseAddrDelta) const;
+	void updateProcBaseImageAddr(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr) const;
+	void updateProcEntryPoint(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr) const;
 	void resumeHost(const PROCESS_INFORMATION& procInfo) const;
 
 // fields
@@ -50,6 +52,7 @@ private:
 
 // consts
 private: 
+	static const std::string RELOC_SECTION_NAME; // ".reloc"
 	static constexpr BYTE BITS_IN_BYTE = 8;
 	static constexpr WORD PE32_MAGIC = 0x10b;
 	static constexpr BYTE BASE_IMG_OFFSET_FROM_PEB = 8;
