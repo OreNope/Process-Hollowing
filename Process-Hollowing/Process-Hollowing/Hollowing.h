@@ -41,7 +41,7 @@ private:
 	PVOID rebindProcHeaders(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr, const LPVOID image) const;
 	PIMAGE_SECTION_HEADER rebindProcSections(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr, const LPVOID image) const;
 	void relocateHostProc(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PIMAGE_SECTION_HEADER piRelocSection, const PVOID hostBaseAddr, const PVOID image, const DWORD baseAddrDelta) const;
-	void updateProcBaseImageAddr(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr) const;
+	void updateProcBaseImageAddr(const PROCESS_INFORMATION& procInfo, const PVOID hostBaseAddr) const;
 	void updateProcEntryPoint(const PROCESS_INFORMATION& procInfo, const PIMAGE_NT_HEADERS piNtHeaders, const PVOID hostBaseAddr) const;
 	void resumeHost(const PROCESS_INFORMATION& procInfo) const;
 
@@ -49,7 +49,7 @@ private:
 private:
 	std::string m_hostPath;
 	std::string m_payloadPath;
-
+	
 // consts
 private: 
 	static const std::string RELOC_SECTION_NAME; // ".reloc"
